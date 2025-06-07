@@ -64,8 +64,6 @@ async function postSignedRequest(endpoint: string, fullPayload: any): Promise<Ap
   return response.data;
 }
 
-// ...imports (same as before)
-
 export default function LoginPage() {
   const oktoClient = useOkto();
   const navigate = useNavigate();
@@ -74,9 +72,7 @@ export default function LoginPage() {
   const [email, setEmail] = useState(localStorage.getItem("okto_email") || "");
   const [otp, setOtp] = useState("");
   const [token, setToken] = useState(localStorage.getItem("okto_token") || "");
-  const [status, setStatus] = useState(
-    localStorage.getItem("okto_status") || "send_OTP"
-  );
+  const [status, setStatus] = useState(localStorage.getItem("okto_status") || "send_OTP");
   const [ethereumAddress, setEthereumAddress] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
@@ -169,6 +165,7 @@ export default function LoginPage() {
       setStatus("verify_OTP");
       localStorage.setItem("okto_token", res.data.token);
       localStorage.setItem("okto_email", email);
+      localStorage.setItem("okto_status", "verify_OTP");
     } catch (error) {
       setError(error instanceof Error ? error.message : "Failed to send OTP");
     } finally {
@@ -180,9 +177,17 @@ export default function LoginPage() {
     setIsLoading(true);
     setError("");
     try {
-      if (!otp) throw new Error("Please enter the OTP");
+      if (!otp) {
+        throw new Error("Please enter the OTP");
+      }
 
-      const payload = { email, token, otp, client_swa: clientSwa };
+      const payload = {
+        email: email,
+        token: token,
+        otp: otp,
+        client_swa: clientSwa,
+      };
+
       const res = await postSignedRequest(
         "https://sandbox-api.okto.tech/api/oc/v1/authenticate/email/verify",
         payload
@@ -193,28 +198,48 @@ export default function LoginPage() {
       }
 
       const authToken = res.data.auth_token;
-      const session = await loginUsingOAuth(authToken, "okto");
+      const session = await loginUsingOAuth(authToken, "google");
 
-      const address = extractEthereumAddress(session);
-      if (address) {
-        setEthereumAddress(address);
-        localStorage.setItem("ethereumAddress", address);
+      if (!session) {
+        throw new Error("Authentication failed: No session returned");
       }
 
-      await oktoClient.loginUsingOAuth(
-        { idToken: authToken, provider: "okto" },
-        (sessionData: OktoSession) => {
-          const callbackAddress = extractEthereumAddress(sessionData);
-          if (callbackAddress) {
-            setEthereumAddress(callbackAddress);
-            localStorage.setItem("ethereumAddress", callbackAddress);
+      if (typeof session === "string") {
+        await oktoClient.loginUsingOAuth(
+          { idToken: session, provider: "google" },
+          (sessionData: OktoSession) => {
+            const address = extractEthereumAddress(sessionData);
+            if (address) {
+              setEthereumAddress(address);
+              localStorage.setItem("ethereumAddress", address);
+            }
+            localStorage.setItem("okto_session", JSON.stringify(sessionData));
+            navigate("/home");
           }
-          localStorage.setItem("okto_session", JSON.stringify(sessionData));
-          navigate("/home");
+        );
+      } else {
+        const address = extractEthereumAddress(session);
+        if (address) {
+          setEthereumAddress(address);
+          localStorage.setItem("ethereumAddress", address);
         }
-      );
+
+        await oktoClient.loginUsingOAuth(
+          { idToken: authToken, provider: "google" },
+          (sessionData: OktoSession) => {
+            const callbackAddress = extractEthereumAddress(sessionData);
+            if (callbackAddress) {
+              setEthereumAddress(callbackAddress);
+              localStorage.setItem("ethereumAddress", callbackAddress);
+            }
+            localStorage.setItem("okto_session", JSON.stringify(sessionData));
+            navigate("/home");
+          }
+        );
+      }
     } catch (error) {
       setError(error instanceof Error ? error.message : "OTP verification failed");
+      localStorage.removeItem("googleIdToken");
     } finally {
       setIsLoading(false);
     }
@@ -322,13 +347,33 @@ export default function LoginPage() {
               >
                 {isLoading ? (
                   <span className="flex items-center justify-center">
-                    <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    <svg
+                      className="animate-spin -ml-1 mr-3 h-5 w-5 text-white"
+                      xmlns="http://www.w3.org/2000/svg"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                    >
+                      <circle
+                        className="opacity-25"
+                        cx="12"
+                        cy="12"
+                        r="10"
+                        stroke="currentColor"
+                        strokeWidth="4"
+                      ></circle>
+                      <path
+                        className="opacity-75"
+                        fill="currentColor"
+                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                      ></path>
                     </svg>
                     {status === "verify_OTP" ? "Verifying..." : "Sending..."}
                   </span>
-                ) : status === "verify_OTP" ? "Verify OTP" : "Send OTP"}
+                ) : status === "verify_OTP" ? (
+                  "Verify OTP"
+                ) : (
+                  "Send OTP"
+                )}
               </button>
 
               {status === "verify_OTP" && (

@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import {
   Address,
   getOrdersHistory,
@@ -8,11 +8,11 @@ import {
   useOkto,
   UserPortfolioData,
 } from "@okto_web3/react-sdk";
-import { tokenTransfer } from "@okto_web3/react-sdk/userop";
-import { getChains } from '@okto_web3/react-sdk';
+import { getChains } from "@okto_web3/react-sdk";
 import { useNavigate } from "react-router-dom";
 import CopyButton from "../components/CopyButton";
 import ViewExplorerURL from "../components/ViewExplorerURL";
+import { transferToken } from "../../intents/tokenTransfer_with_estimate"; 
 
 // Types
 interface TokenOption {
@@ -184,14 +184,10 @@ function TwoStepTokenTransfer() {
         const data = await getPortfolio(oktoClient);
         setPortfolio(data);
 
-        // Process portfolio data into a more usable format
         if (data?.groupTokens) {
-          // Create a map of all tokens with their balances
           const tokenBalanceMap = new Map();
 
-          // Process direct tokens in groupTokens
           data.groupTokens.forEach((group) => {
-            // Some items in groupTokens are direct tokens
             if (group.aggregationType === "token") {
               tokenBalanceMap.set(group.symbol, {
                 balance: group.balance,
@@ -200,7 +196,6 @@ function TwoStepTokenTransfer() {
               });
             }
 
-            // Some items have nested tokens
             if (group.tokens && group.tokens.length > 0) {
               group.tokens.forEach((token) => {
                 tokenBalanceMap.set(token.symbol, {
@@ -212,14 +207,12 @@ function TwoStepTokenTransfer() {
             }
           });
 
-          // If we have a selected token, update its balance
           if (selectedToken && tokenBalanceMap.has(selectedToken)) {
             setTokenBalance(tokenBalanceMap.get(selectedToken));
           } else {
             setTokenBalance(null);
           }
 
-          // Store the map for later use
           setPortfolioBalance(
             Array.from(tokenBalanceMap.entries()).map(([symbol, data]) => ({
               symbol,
@@ -236,7 +229,6 @@ function TwoStepTokenTransfer() {
     fetchPortfolio();
   }, [oktoClient, selectedToken]);
 
-  // handle network change
   const handleNetworkChange = (e: any) => {
     const selectedCaipId = e.target.value;
     setSelectedChain(selectedCaipId);
@@ -249,7 +241,6 @@ function TwoStepTokenTransfer() {
     setSponsorshipEnabled(selectedChainObj?.sponsorshipEnabled || false);
   };
 
-  // Function to handle token selection
   const handleTokenSelect = (symbol: string) => {
     setSelectedToken(symbol);
     if (portfolioBalance) {
@@ -258,7 +249,6 @@ function TwoStepTokenTransfer() {
     }
   };
 
-  // Transaction handlers
   const handleGetOrderHistory = async (id?: string) => {
     const intentId = id || jobId;
     if (!intentId) {
@@ -312,16 +302,16 @@ function TwoStepTokenTransfer() {
 
     try {
       const transferParams = validateFormData();
-      // Note overher: you can directly import tokenTransfer from the @okto_web3/react-sdk
-      // On doing so, you'll directly get the jobId and you won't have to follow the below code.
-      const userOp = await tokenTransfer(oktoClient, transferParams);
-      const signedOp = await oktoClient.signUserOp(userOp);
-      const jobId = await oktoClient.executeUserOp(signedOp);
+      const sessionConfig = {
+        sessionPrivKey: "0x85ffef45e363f107476800f052102a940fcfa1167023ee462a859d3cada0cc76",
+        sessionPubkey: "0x04869dbfba722c6d3bdcb56ac2475f37c85b21907b3c1f748271a80bca12d60ea45612dfdf7dfbdea0035ee8633d8c6717cea87ee451830bf0ecb35c6b37825e4c",
+        userSWA: "0x281FaF4F242234c7AeD53530014766E845AC1E90",
+      };
 
+      const jobId = await transferToken(transferParams, sessionConfig);
       setJobId(jobId);
       await handleGetOrderHistory(jobId);
       showModal("jobId");
-
       console.log("Transfer jobId:", jobId);
     } catch (error: any) {
       console.error("Error in token transfer:", error);
@@ -331,73 +321,8 @@ function TwoStepTokenTransfer() {
     }
   };
 
-  const handleTokenTransferUserOp = async () => {
-    setIsLoading(true);
-    setError(null);
-
-    try {
-      const transferParams = validateFormData();
-      const userOp = await tokenTransfer(oktoClient, transferParams);
-      setUserOp(userOp);
-      showModal("unsignedOp");
-      console.log("UserOp:", userOp);
-    } catch (error: any) {
-      console.error("Error in token transfer:", error);
-      setError(`Error in creating user operation: ${error.message}`);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleSignUserOp = async () => {
-    if (!userOp) {
-      setError("No transaction to sign");
-      return;
-    }
-
-    setIsLoading(true);
-    setError(null);
-
-    try {
-      const signedOp = await oktoClient.signUserOp(userOp);
-      setSignedUserOp(signedOp);
-      showModal("signedOp");
-      console.log("Signed UserOp", signedOp);
-    } catch (error: any) {
-      console.error("Error in signing the userop:", error);
-      setError(`Error in signing transaction: ${error.message}`);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleExecuteUserOp = async () => {
-    if (!signedUserOp) {
-      setError("No signed transaction to execute");
-      return;
-    }
-
-    setIsLoading(true);
-    setError(null);
-
-    try {
-      const jobId = await oktoClient.executeUserOp(signedUserOp);
-      setJobId(jobId);
-      await handleGetOrderHistory(jobId);
-      showModal("jobId");
-      console.log("Job Id", jobId);
-    } catch (error: any) {
-      console.error("Error in executing the userop:", error);
-      setError(`Error in executing transaction: ${error.message}`);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  // Render form fields
   const renderForm = () => (
     <div className="space-y-4">
-      {/* Network Selection */}
       <div>
         <label className="block text-sm font-medium text-gray-300 mb-1">
           Select Network
@@ -426,7 +351,6 @@ function TwoStepTokenTransfer() {
         </p>
       )}
 
-      {/* Token Selection */}
       <div>
         <label className="block text-sm font-medium text-gray-300 mb-1">
           Select Token
@@ -441,10 +365,10 @@ function TwoStepTokenTransfer() {
             {loadingTokens
               ? "Loading tokens..."
               : !selectedChain
-                ? "Select a network first"
-                : tokens.length === 0
-                  ? "No tokens available"
-                  : "Select a token"}
+              ? "Select a network first"
+              : tokens.length === 0
+              ? "No tokens available"
+              : "Select a token"}
           </option>
           {tokens.map((token) => (
             <option
@@ -457,7 +381,6 @@ function TwoStepTokenTransfer() {
         </select>
       </div>
 
-      {/* Amount Field */}
       <div>
         <label className="flex justify-between block text-sm font-medium text-gray-300 mb-1">
           <p>Amount (in smallest unit):</p>
@@ -502,7 +425,6 @@ function TwoStepTokenTransfer() {
         </small>
       </div>
 
-      {/* Recipient Address */}
       <div>
         <label className="block text-sm font-medium text-gray-300 mb-1">
           Recipient Address
@@ -517,7 +439,6 @@ function TwoStepTokenTransfer() {
         />
       </div>
 
-      {/* Action Buttons */}
       <div className="flex gap-4 pt-2">
         <button
           className="w-full p-3 bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors disabled:bg-blue-800 disabled:opacity-50"
@@ -530,29 +451,14 @@ function TwoStepTokenTransfer() {
             !recipient
           }
         >
-          {isLoading ? "Processing..." : "Transfer Token (Direct)"}
-        </button>
-        <button
-          className="w-full p-3 bg-purple-600 hover:bg-purple-700 text-white rounded transition-colors disabled:bg-purple-800 disabled:opacity-50"
-          onClick={handleTokenTransferUserOp}
-          disabled={
-            isLoading ||
-            !selectedChain ||
-            !selectedToken ||
-            !amount ||
-            !recipient
-          }
-        >
-          {isLoading ? "Processing..." : "Create Token Transfer UserOp"}
+          {isLoading ? "Processing..." : "Transfer Token"}
         </button>
       </div>
     </div>
   );
 
-  // Render modals
   const renderModals = () => (
     <>
-      {/* Job ID Modal */}
       <Modal
         isOpen={activeModal === "jobId"}
         onClose={() => showModal("orderHistory")}
@@ -577,82 +483,6 @@ function TwoStepTokenTransfer() {
         </div>
       </Modal>
 
-      {/* Unsigned Transaction Modal */}
-      <Modal
-        isOpen={activeModal === "unsignedOp"}
-        onClose={closeAllModals}
-        title="Review Transaction"
-      >
-        <div className="space-y-4 text-white">
-          <p>Please review your transaction details before signing.</p>
-          <div className="bg-gray-700 p-3 rounded">
-            <p className="text-sm text-gray-300 mb-1">Transaction Details:</p>
-            <div className="bg-gray-900 p-2 rounded font-mono text-sm overflow-auto max-h-40">
-              <CopyButton text={JSON.stringify(userOp, null, 2) ?? ""} />
-              <pre>{JSON.stringify(userOp, null, 2)}</pre>
-            </div>
-          </div>
-          <div className="bg-gray-700 p-3 rounded">
-            <p className="text-sm text-gray-300 mb-1">Summary:</p>
-            <ul className="space-y-1">
-              <li>
-                <span className="text-gray-400">Token:</span> {selectedToken}
-              </li>
-              <li>
-                <span className="text-gray-400">Amount:</span> {amount}
-              </li>
-              <li>
-                <span className="text-gray-400">Recipient:</span> {recipient}
-              </li>
-              <li>
-                <span className="text-gray-400">Network:</span>{" "}
-                {chains.find((c) => c.caipId === selectedChain)?.networkName}
-              </li>
-            </ul>
-          </div>
-          <div className="flex justify-center pt-2">
-            <button
-              className="p-3 bg-green-600 hover:bg-green-700 text-white rounded transition-colors w-full"
-              onClick={handleSignUserOp}
-              disabled={isLoading}
-            >
-              {isLoading ? "Signing..." : "Sign Transaction"}
-            </button>
-          </div>
-        </div>
-      </Modal>
-
-      {/* Signed Transaction Modal */}
-      <Modal
-        isOpen={activeModal === "signedOp"}
-        onClose={closeAllModals}
-        title="Sign Completed"
-      >
-        <div className="space-y-4 text-white">
-          <p>
-            Your transaction has been signed successfully and is ready to be
-            executed.
-          </p>
-          <div className="bg-gray-700 p-3 rounded">
-            <p className="text-sm text-gray-300 mb-1">Signed Transaction:</p>
-            <div className="bg-gray-900 p-2 rounded font-mono text-sm overflow-auto max-h-40">
-              <CopyButton text={JSON.stringify(signedUserOp, null, 2) ?? ""} />
-              <pre>{JSON.stringify(signedUserOp, null, 2)}</pre>
-            </div>
-          </div>
-          <div className="flex justify-center pt-2">
-            <button
-              className="p-3 bg-purple-600 hover:bg-purple-700 text-white rounded transition-colors w-full"
-              onClick={handleExecuteUserOp}
-              disabled={isLoading}
-            >
-              {isLoading ? "Executing..." : "Execute Transaction"}
-            </button>
-          </div>
-        </div>
-      </Modal>
-
-      {/* Order History Modal */}
       <Modal
         isOpen={activeModal === "orderHistory"}
         onClose={closeAllModals}
@@ -663,7 +493,6 @@ function TwoStepTokenTransfer() {
             <p>Transaction Details:</p>
           </div>
 
-          {/* Order History Details */}
           {orderHistory ? (
             <div className="bg-gray-700 p-4 rounded-md">
               <p>
@@ -688,7 +517,6 @@ function TwoStepTokenTransfer() {
             <p className="text-gray-400">No order history available.</p>
           )}
 
-          {/* GET order History */}
           {orderHistory && (
             <>
               {orderHistory.status === "SUCCESSFUL" ? (
@@ -715,7 +543,6 @@ function TwoStepTokenTransfer() {
             </>
           )}
 
-          {/* Reset Form Button */}
           <div className="flex justify-center pt-2">
             <button
               className="p-3 bg-gray-600 hover:bg-gray-700 text-white rounded transition-colors w-full"
