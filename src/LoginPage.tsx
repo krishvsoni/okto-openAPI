@@ -362,7 +362,7 @@ export default function LoginPage() {
                 ? "text-blue-500 border-b-2 border-blue-500"
                 : "text-gray-400 hover:text-gray-300"
             }`}
-            disabled={isLoading}
+            // disabled={isLoading}
           >
             Google
           </button>
