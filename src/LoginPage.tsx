@@ -64,6 +64,8 @@ async function postSignedRequest(endpoint: string, fullPayload: any): Promise<Ap
   return response.data;
 }
 
+// ...imports (same as before)
+
 export default function LoginPage() {
   const oktoClient = useOkto();
   const navigate = useNavigate();
@@ -92,46 +94,17 @@ export default function LoginPage() {
   }, [oktoClient, navigate]);
 
   const extractEthereumAddress = (session: OktoSession | string): string => {
-    if (typeof session === "string") return "";
-    
-    // Check if session is null or undefined
-    if (!session) {
-      console.warn("Session is null or undefined");
-      return "";
-    }
-
+    if (typeof session === "string" || !session) return "";
     try {
-      // Debug logging
-      console.log("Session object:", session);
-      console.log("SessionKey:", session.sessionKey);
-      
-      // The SessionKey has getter methods, try accessing directly
-      if (session.sessionKey) {
-        // Try accessing as property (getter will be called automatically)
-        const address = session.sessionKey.ethereumAddress;
-        console.log("Extracted address:", address);
-        if (address) return address;
+      if (session.sessionKey?.ethereumAddress) {
+        return session.sessionKey.ethereumAddress;
       }
-      
-      // Try accessing it directly from session
       if (session.ethereumAddress) {
         return session.ethereumAddress;
       }
-
-      // If the above doesn't work, try accessing the private key and deriving address
-      if (session.sessionKey?.privateKeyHexWith0x) {
-        console.log("Private key available:", session.sessionKey.privateKeyHexWith0x);
-        // You could derive the ethereum address from the private key if needed
-      }
-
-      console.log("Available session properties:", Object.keys(session));
-      console.log("SessionKey type:", typeof session.sessionKey);
-      console.log("SessionKey constructor:", session.sessionKey?.constructor?.name);
-      
     } catch (error) {
       console.error("Error extracting ethereum address:", error);
     }
-
     return "";
   };
 
@@ -139,51 +112,18 @@ export default function LoginPage() {
     setIsLoading(true);
     setError("");
     try {
-      console.log("Starting authentication with token:", idToken);
-      
       const session = await loginUsingOAuth(idToken, "google");
-      console.log("Session data:", session);
+      if (!session) throw new Error("Authentication failed: No session returned");
 
-      if (!session) {
-        throw new Error("Authentication failed: No session data returned");
-      }
-
-      // Handle case where session is an auth token string
-      if (typeof session === "string") {
-        await oktoClient.loginUsingOAuth(
-          { idToken: session, provider: "google" },
-          (sessionData: OktoSession) => {
-            const address = extractEthereumAddress(sessionData);
-            if (!address) {
-              console.warn("Ethereum address not found in session data, continuing anyway");
-              // Don't throw error, just continue with empty address
-            }
-            console.log("Session stored:", sessionData);
-            setEthereumAddress(address);
-            localStorage.setItem("ethereumAddress", address);
-            localStorage.setItem("okto_session", JSON.stringify(sessionData));
-            navigate("/home");
-          }
-        );
-        return;
-      }
-
-      // Handle case where session is an object
       const address = extractEthereumAddress(session);
-      if (!address) {
-        console.warn("Session address is undefined, but continuing with authentication");
-        // Don't throw error, just log warning
+      if (address) {
+        setEthereumAddress(address);
+        localStorage.setItem("ethereumAddress", address);
       }
-
-      console.log("Session address:", address);
-      setEthereumAddress(address);
-      localStorage.setItem("ethereumAddress", address);
 
       await oktoClient.loginUsingOAuth(
         { idToken, provider: "google" },
         (sessionData: OktoSession) => {
-          console.log("Session stored:", sessionData);
-          // Try to extract address from the callback session data too
           const callbackAddress = extractEthereumAddress(sessionData);
           if (callbackAddress) {
             setEthereumAddress(callbackAddress);
@@ -194,7 +134,6 @@ export default function LoginPage() {
         }
       );
     } catch (error) {
-      console.error("Authentication failed:", error);
       setError(error instanceof Error ? error.message : "Authentication failed");
       localStorage.removeItem("googleIdToken");
     } finally {
@@ -214,32 +153,23 @@ export default function LoginPage() {
     setIsLoading(true);
     setError("");
     try {
-      if (!email) {
-        throw new Error("Please enter a valid email address");
-      }
+      if (!email) throw new Error("Please enter a valid email address");
 
-      const payload = {
-        email: email,
-        client_swa: clientSwa,
-      };
-
-      console.log("Calling sendOtp with payload:", payload);
+      const payload = { email, client_swa: clientSwa };
       const res = await postSignedRequest(
         "https://sandbox-api.okto.tech/api/oc/v1/authenticate/email",
         payload
       );
-      
+
       if (res.status !== "success" || !res.data.token) {
         throw new Error("Failed to send OTP");
       }
 
-      console.log("OTP Sent:", res);
       setToken(res.data.token);
       setStatus("verify_OTP");
       localStorage.setItem("okto_token", res.data.token);
       localStorage.setItem("okto_email", email);
     } catch (error) {
-      console.error("Error sending OTP:", error);
       setError(error instanceof Error ? error.message : "Failed to send OTP");
     } finally {
       setIsLoading(false);
@@ -250,89 +180,40 @@ export default function LoginPage() {
     setIsLoading(true);
     setError("");
     try {
-      if (!otp) {
-        throw new Error("Please enter the OTP");
-      }
+      if (!otp) throw new Error("Please enter the OTP");
 
-      const payload = {
-        email: email,
-        token: token,
-        otp: otp,
-        client_swa: clientSwa,
-      };
-
+      const payload = { email, token, otp, client_swa: clientSwa };
       const res = await postSignedRequest(
         "https://sandbox-api.okto.tech/api/oc/v1/authenticate/email/verify",
         payload
       );
-
-      console.log("OTP Verified:", res);
 
       if (res.status !== "success" || !res.data.auth_token) {
         throw new Error("OTP verification failed");
       }
 
       const authToken = res.data.auth_token;
-      console.log("Auth token received:", authToken);
-      
-      try {
-        const session = await loginUsingOAuth(authToken, "okto");
-        console.log("Full session object:", session);
+      const session = await loginUsingOAuth(authToken, "okto");
 
-        // Check if session is undefined or null
-        if (!session) {
-          console.error("Session is undefined - API authentication may have failed");
-          throw new Error("Authentication failed: Unable to create session. Please check your API configuration.");
-        }
-
-        let ethAddress = "";
-
-        if (typeof session === "string") {
-          // If session is just a token string
-          await oktoClient.loginUsingOAuth(
-            { idToken: session, provider: "okto" },
-            (sessionData: OktoSession) => {
-              ethAddress = extractEthereumAddress(sessionData);
-              if (!ethAddress) {
-                console.warn("Ethereum address not found in session data, continuing anyway");
-              }
-              setEthereumAddress(ethAddress);
-              localStorage.setItem("ethereumAddress", ethAddress);
-              localStorage.setItem("okto_session", JSON.stringify(sessionData));
-              navigate("/home");
-            }
-          );
-        } else {
-          // If session is an object
-          ethAddress = extractEthereumAddress(session);
-          if (!ethAddress) {
-            console.warn("Failed to retrieve Ethereum address from session, but continuing");
-          }
-
-          setEthereumAddress(ethAddress);
-          localStorage.setItem("ethereumAddress", ethAddress);
-
-          await oktoClient.loginUsingOAuth(
-            { idToken: authToken, provider: "okto" },
-            (sessionData: OktoSession) => {
-              console.log("Session stored:", sessionData);
-              // Try to extract address from callback session data too
-              const callbackAddress = extractEthereumAddress(sessionData);
-              if (callbackAddress) {
-                setEthereumAddress(callbackAddress);
-                localStorage.setItem("ethereumAddress", callbackAddress);
-              }
-              localStorage.setItem("okto_session", JSON.stringify(sessionData));
-              navigate("/home");
-            }
-          );
-        }
-      } catch (sessionError) {
-        console.error("Session creation error:", sessionError);
-        // throw new Error(`Authentication failed: ${sessionError instanceof Error ? sessionError.message : 'Unknown session error'}`);
+      const address = extractEthereumAddress(session);
+      if (address) {
+        setEthereumAddress(address);
+        localStorage.setItem("ethereumAddress", address);
       }
+
+      await oktoClient.loginUsingOAuth(
+        { idToken: authToken, provider: "okto" },
+        (sessionData: OktoSession) => {
+          const callbackAddress = extractEthereumAddress(sessionData);
+          if (callbackAddress) {
+            setEthereumAddress(callbackAddress);
+            localStorage.setItem("ethereumAddress", callbackAddress);
+          }
+          localStorage.setItem("okto_session", JSON.stringify(sessionData));
+          navigate("/home");
+        }
+      );
     } catch (error) {
-      console.error("Error verifying OTP:", error);
       setError(error instanceof Error ? error.message : "OTP verification failed");
     } finally {
       setIsLoading(false);
@@ -340,14 +221,10 @@ export default function LoginPage() {
   };
 
   const handleEmailAction = async () => {
-    try {
-      if (status === "send_OTP" || status === "resend_OTP") {
-        await sendOtp();
-      } else if (status === "verify_OTP") {
-        await verifyOtp();
-      }
-    } catch (err) {
-      console.error("Email login error:", err);
+    if (status === "send_OTP" || status === "resend_OTP") {
+      await sendOtp();
+    } else if (status === "verify_OTP") {
+      await verifyOtp();
     }
   };
 
@@ -362,7 +239,6 @@ export default function LoginPage() {
                 ? "text-blue-500 border-b-2 border-blue-500"
                 : "text-gray-400 hover:text-gray-300"
             }`}
-            // disabled={isLoading}
           >
             Google
           </button>
@@ -391,7 +267,6 @@ export default function LoginPage() {
           </div>
         )}
 
-        {/* Debug info - remove in production */}
         {ethereumAddress && (
           <div className="mb-4 p-3 bg-green-900 text-green-100 rounded-lg text-sm">
             Address: {ethereumAddress}
@@ -404,14 +279,17 @@ export default function LoginPage() {
               <p className="text-gray-400 text-center">
                 Sign in with your Google account
               </p>
-              <GoogleLogin
-                onSuccess={handleGoogleLogin}
-                onError={() => setError("Google login failed")}
-                theme="filled_black"
-                size="large"
-                shape="rectangular"
-                disabled={isLoading}
-              />
+              {!isLoading ? (
+                <GoogleLogin
+                  onSuccess={handleGoogleLogin}
+                  onError={() => setError("Google login failed")}
+                  theme="filled_black"
+                  size="large"
+                  shape="rectangular"
+                />
+              ) : (
+                <div className="text-gray-500 text-sm">Loading Google Login...</div>
+              )}
             </div>
           )}
 
