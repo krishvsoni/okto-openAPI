@@ -12,7 +12,7 @@ import { getChains } from "@okto_web3/react-sdk";
 import { useNavigate } from "react-router-dom";
 import CopyButton from "../components/CopyButton";
 import ViewExplorerURL from "../components/ViewExplorerURL";
-import { transferToken } from "../../intents/tokenTransfer_with_estimate"; 
+import { transferToken } from "../../intents/tokenTransfer_with_estimate";
 
 // Types
 interface TokenOption {
@@ -127,7 +127,7 @@ function TwoStepTokenTransfer() {
       amount: BigInt(amount),
       recipient: recipient as Address,
       token: token.address as Address,
-      caip2Id: selectedChain,
+      caipId: selectedChain,
     };
   };
 
@@ -229,7 +229,7 @@ function TwoStepTokenTransfer() {
     fetchPortfolio();
   }, [oktoClient, selectedToken]);
 
-  const handleNetworkChange = (e: any) => {
+  const handleNetworkChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const selectedCaipId = e.target.value;
     setSelectedChain(selectedCaipId);
     setSelectedToken("");
