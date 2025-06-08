@@ -1,5 +1,6 @@
 // using intent API call 
 
+/* eslint-disable @typescript-eslint/no-unused-vars */
 "use client";
 import { useState, useEffect } from "react";
 import {
@@ -14,7 +15,7 @@ import { getChains } from "@okto_web3/react-sdk";
 import { useNavigate } from "react-router-dom";
 import CopyButton from "../components/CopyButton";
 import ViewExplorerURL from "../components/ViewExplorerURL";
-import { transferToken } from "../../intents/tokenTransfer_with_estimate"; 
+import { transferToken } from "../../intents/tokenTransfer_with_estimate";
 
 // Types
 interface TokenOption {
@@ -30,6 +31,20 @@ interface ModalProps {
   onClose: () => void;
   title: string;
   children: React.ReactNode;
+}
+
+// Updated Data interface to match the transferToken function requirements
+interface TransferData {
+  caipId: string;
+  recipient: string;
+  token: string;
+  amount: string; // Keep as string as expected by transferToken
+}
+
+interface SessionConfig {
+  sessionPrivKey: string;
+  sessionPubkey: string;
+  userSWA: string;
 }
 
 // Components
@@ -117,7 +132,7 @@ function TwoStepTokenTransfer() {
     closeAllModals();
   };
 
-  const validateFormData = () => {
+  const validateFormData = (): TransferData => {
     const token = tokens.find((t) => t.symbol === selectedToken);
     if (!token) throw new Error("Please select a valid token");
     if (!amount || isNaN(Number(amount)) || Number(amount) <= 0)
@@ -126,10 +141,10 @@ function TwoStepTokenTransfer() {
       throw new Error("Please enter a valid recipient address");
 
     return {
-      amount: BigInt(amount),
-      recipient: recipient as Address,
-      token: token.address as Address,
-      caip2Id: selectedChain,
+      amount: amount, // Keep as string
+      recipient: recipient,
+      token: token.address || "", // Use empty string for native tokens
+      caipId: selectedChain,
     };
   };
 
@@ -231,7 +246,7 @@ function TwoStepTokenTransfer() {
     fetchPortfolio();
   }, [oktoClient, selectedToken]);
 
-  const handleNetworkChange = (e: any) => {
+  const handleNetworkChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const selectedCaipId = e.target.value;
     setSelectedChain(selectedCaipId);
     setSelectedToken("");
@@ -304,17 +319,33 @@ function TwoStepTokenTransfer() {
 
     try {
       const transferParams = validateFormData();
-      const sessionConfig = {
+      const sessionConfig: SessionConfig = {
         sessionPrivKey: "0x85ffef45e363f107476800f052102a940fcfa1167023ee462a859d3cada0cc76",
         sessionPubkey: "0x04869dbfba722c6d3bdcb56ac2475f37c85b21907b3c1f748271a80bca12d60ea45612dfdf7dfbdea0035ee8633d8c6717cea87ee451830bf0ecb35c6b37825e4c",
         userSWA: "0x281FaF4F242234c7AeD53530014766E845AC1E90",
       };
 
-      const jobId = await transferToken(transferParams, sessionConfig);
-      setJobId(jobId);
-      await handleGetOrderHistory(jobId);
+      const feePayerAddress: Address = "0xdb9B5bbf015047D84417df078c8F06fDb6D71b76";
+
+      let result: string;
+      if (sponsorshipEnabled) {
+        await transferToken(transferParams, sessionConfig, feePayerAddress);
+     
+        result = "";
+      } else {
+        await transferToken(transferParams, sessionConfig);
+        result = "";
+      }
+
+      setJobId(result);
       showModal("jobId");
-      console.log("Transfer jobId:", jobId);
+      console.log("Transfer jobId:", result);
+      
+      // Automatically fetch order history after successful transfer
+      setTimeout(() => {
+        handleGetOrderHistory(result);
+      }, 2000); // Wait 2 seconds before checking status
+      
     } catch (error: any) {
       console.error("Error in token transfer:", error);
       setError(`Error in token transfer: ${error.message}`);
