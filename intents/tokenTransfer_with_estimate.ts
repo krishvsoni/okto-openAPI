@@ -19,7 +19,7 @@ import dotenv from "dotenv";
 import type { Address } from "../helper/types.js";
 
 dotenv.config();
-const OktoAuthToken = process.env.OKTO_AUTH_TOKEN as string;
+const OktoAuthToken = process.env.VITE_OKTO_AUTH_TOKEN as string;
 
 interface Data {
   caipId: string;

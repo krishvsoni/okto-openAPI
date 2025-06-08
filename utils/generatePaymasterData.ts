@@ -14,8 +14,8 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-const clientPrivateKey = process.env.OKTO_CLIENT_PRIVATE_KEY as Hash;
-const clientSWA = process.env.OKTO_CLIENT_SWA as Hex;
+const clientPrivateKey = "0xc1c03f2908a9bf6a73ba1589898b354c5ab5bb4da053f4fcdc977f289acbd234" as Hash;
+const clientSWA = "0x7337975B2D8CE19c2a201C42106aAc0e7E40d109" as Hex;
 
 /**
  * Generates paymaster data for transactions
