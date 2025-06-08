@@ -9,38 +9,7 @@ import { generateClientSignature } from "../utils/generateClientSignature";
 
 dotenv.config();
 
-type TabType = "google" | "email";
-
-interface SessionKey {
-  priv: Uint8Array;
-  privateKey: Uint8Array;
-  privateKeyHex: string;
-  privateKeyHexWith0x: string;
-  compressedPublicKey: string;
-  uncompressedPublicKey: string;
-  uncompressedPublicKeyHex: string;
-  uncompressedPublicKeyHexWith0x: string;
-  ethereumAddress: string;
-}
-
-interface OktoSession {
-  sessionKey?: SessionKey;
-  ethereumAddress?: string;
-  authToken?: string;
-  [key: string]: any;
-}
-
-interface ApiResponse {
-  status: string;
-  data: {
-    token?: string;
-    auth_token?: string;
-    userSWA?: string;
-    [key: string]: any;
-  };
-}
-
-async function postSignedRequest(endpoint: string, fullPayload: any): Promise<ApiResponse> {
+async function postSignedRequest(endpoint, fullPayload) {
   const payloadWithTimestamp = {
     ...fullPayload,
     timestamp: Date.now() - 1000,
@@ -54,8 +23,7 @@ async function postSignedRequest(endpoint: string, fullPayload: any): Promise<Ap
     type: "ethsign",
   };
 
-  console.log("Request Body:", requestBody);
-  const response = await axios.post<ApiResponse>(endpoint, requestBody, {
+  const response = await axios.post(endpoint, requestBody, {
     headers: {
       "Content-Type": "application/json",
     },
@@ -67,29 +35,29 @@ async function postSignedRequest(endpoint: string, fullPayload: any): Promise<Ap
 export default function LoginPage() {
   const oktoClient = useOkto();
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState<TabType>("google");
-
-  const [email, setEmail] = useState(localStorage.getItem("okto_email") || "");
+  const [activeTab, setActiveTab] = useState("google");
+  const [email, setEmail] = useState("");
   const [otp, setOtp] = useState("");
-  const [token, setToken] = useState(localStorage.getItem("okto_token") || "");
-  const [status, setStatus] = useState(localStorage.getItem("okto_status") || "send_OTP");
+  const [token, setToken] = useState("");
+  const [status, setStatus] = useState("send_OTP");
   const [ethereumAddress, setEthereumAddress] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
+  const [requestBody, setRequestBody] = useState(null);
+  const [responseData, setResponseData] = useState(null);
 
   const clientSwa = "0x7337975B2D8CE19c2a201C42106aAc0e7E40d109";
 
   useEffect(() => {
     if (oktoClient.isLoggedIn()) {
       navigate("/home");
-      return;
     }
 
     const storedToken = localStorage.getItem("googleIdToken");
     if (storedToken) handleAuthenticate(storedToken);
   }, [oktoClient, navigate]);
 
-  const extractEthereumAddress = (session: OktoSession | string): string => {
+  const extractEthereumAddress = (session) => {
     if (typeof session === "string" || !session) return "";
     try {
       if (session.sessionKey?.ethereumAddress) {
@@ -104,7 +72,7 @@ export default function LoginPage() {
     return "";
   };
 
-  const handleAuthenticate = async (idToken: string) => {
+  const handleAuthenticate = async (idToken) => {
     setIsLoading(true);
     setError("");
     try {
@@ -119,7 +87,7 @@ export default function LoginPage() {
 
       await oktoClient.loginUsingOAuth(
         { idToken, provider: "google" },
-        (sessionData: OktoSession) => {
+        (sessionData) => {
           const callbackAddress = extractEthereumAddress(sessionData);
           if (callbackAddress) {
             setEthereumAddress(callbackAddress);
@@ -137,7 +105,7 @@ export default function LoginPage() {
     }
   };
 
-  const handleGoogleLogin = async (credentialResponse: { credential?: string }) => {
+  const handleGoogleLogin = async (credentialResponse) => {
     const idToken = credentialResponse.credential || "";
     if (idToken) {
       localStorage.setItem("googleIdToken", idToken);
@@ -152,10 +120,17 @@ export default function LoginPage() {
       if (!email) throw new Error("Please enter a valid email address");
 
       const payload = { email, client_swa: clientSwa };
+      setRequestBody({
+        data: payload,
+        client_signature: "signature_placeholder",
+        type: "ethsign",
+      });
+
       const res = await postSignedRequest(
         "https://sandbox-api.okto.tech/api/oc/v1/authenticate/email",
         payload
       );
+      setResponseData(res);
 
       if (res.status !== "success" || !res.data.token) {
         throw new Error("Failed to send OTP");
@@ -164,7 +139,6 @@ export default function LoginPage() {
       setToken(res.data.token);
       setStatus("verify_OTP");
       localStorage.setItem("okto_token", res.data.token);
-      localStorage.setItem("okto_email", email);
       localStorage.setItem("okto_status", "verify_OTP");
     } catch (error) {
       setError(error instanceof Error ? error.message : "Failed to send OTP");
@@ -198,7 +172,7 @@ export default function LoginPage() {
       }
 
       const authToken = res.data.auth_token;
-      const session = await loginUsingOAuth(authToken, "google");
+      const session = await loginUsingOAuth(authToken, "okto");
 
       if (!session) {
         throw new Error("Authentication failed: No session returned");
@@ -206,8 +180,8 @@ export default function LoginPage() {
 
       if (typeof session === "string") {
         await oktoClient.loginUsingOAuth(
-          { idToken: session, provider: "google" },
-          (sessionData: OktoSession) => {
+          { idToken: session, provider: "okto" },
+          (sessionData) => {
             const address = extractEthereumAddress(sessionData);
             if (address) {
               setEthereumAddress(address);
@@ -225,8 +199,8 @@ export default function LoginPage() {
         }
 
         await oktoClient.loginUsingOAuth(
-          { idToken: authToken, provider: "google" },
-          (sessionData: OktoSession) => {
+          { idToken: authToken, provider: "okto" },
+          (sessionData) => {
             const callbackAddress = extractEthereumAddress(sessionData);
             if (callbackAddress) {
               setEthereumAddress(callbackAddress);
@@ -395,6 +369,24 @@ export default function LoginPage() {
             </div>
           )}
         </div>
+
+        {requestBody && (
+          <div className="mt-6 p-4 bg-gray-800 rounded-lg">
+            <h2 className="text-lg font-semibold text-white">Request Body:</h2>
+            <pre className="text-sm text-gray-300 mt-2 overflow-auto">
+              {JSON.stringify(requestBody, null, 2)}
+            </pre>
+          </div>
+        )}
+
+        {responseData && (
+          <div className="mt-4 p-4 bg-gray-800 rounded-lg">
+            <h2 className="text-lg font-semibold text-white">Response:</h2>
+            <pre className="text-sm text-gray-300 mt-2 overflow-auto">
+              {JSON.stringify(responseData, null, 2)}
+            </pre>
+          </div>
+        )}
       </div>
     </main>
   );
