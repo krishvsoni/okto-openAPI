@@ -331,7 +331,8 @@ function TwoStepTokenTransfer() {
      
         result = "";
       } else {
-        result = await transferToken(transferParams, sessionConfig);
+        await transferToken(transferParams, sessionConfig);
+        result = "";
       }
 
       setJobId(result);
