@@ -646,7 +646,7 @@ function TwoStepTokenTransfer() {
               <div className="flex items-center gap-2">
                 <span>Transaction Hash:</span>
                 <CopyButton text={transactionHash} />
-                <ViewExplorerURL hash={transactionHash} />
+                {/* <ViewExplorerURL hash={transactionHash} /> */}
               </div>
             )}
           </div>
@@ -696,7 +696,7 @@ function TwoStepTokenTransfer() {
               {orderHistory.status === "SUCCESSFUL" ? (
                 <div className="flex justify-center w-full pt-2">
                   <ViewExplorerURL
-                    hash={orderHistory.downstreamTransactionHash[0]}
+                    transactionHash={orderHistory.downstreamTransactionHash[0]}
                     url={explorerUrl || ""}
                   />
                 </div>
