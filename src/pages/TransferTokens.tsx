@@ -431,74 +431,74 @@ function TwoStepTokenTransfer() {
     }
   }
 
-  const handleTransferToken = async (): Promise<TransferResult | void> => {
-    setIsLoading(true)
-    setError(null)
+const handleTransferToken = async (): Promise<TransferResult | undefined> => {
+  setIsLoading(true)
+  setError(null)
 
-    try {
-      const session = await verifyUserSession()
-      if (!session) return
+  try {
+    const session = await verifyUserSession()
+    if (!session) return undefined 
 
-      const transferData = validateFormData()
+    const transferData = validateFormData()
 
-      const sessionData = await verifySession(session)
-      const sessionConfig: SessionConfig = {
-        sessionPrivKey: sessionData.data.session_priv_key,
-        sessionPubkey: sessionData.data.session_pub_key,
-        userSWA: sessionData.data.user_swa,
-      }
-
-      const feePayerAddress = "0xdb9B5bbf015047D84417df078c8F06fDb6D71b76"
-
-      const estimatedOp = await estimateUserOp(
-        {
-          intent: "TOKEN_TRANSFER",
-          chainId: selectedChain,
-          tokenAddress: transferData.token,
-          amount: transferData.amount,
-          recipient: transferData.recipient,
-        },
-        session,
-      )
-      setEstimatedUserOp(estimatedOp)
-
-      const transferResult: TransferResult = await transferToken(
-        transferData,
-        sessionConfig,
-        sponsorshipEnabled ? feePayerAddress : undefined,
-      )
-      setJobId(transferResult.intentId)
-
-      const signedOp = await signUserOp(transferResult.userOp, sessionConfig)
-      setSignedUserOp(signedOp)
-
-      const executionResult: ExecutionResult = await executeUserOp(signedOp, session)
-      setTransactionHash(executionResult.transactionHash)
-
-      const selectedChainObj = chains.find((chain) => chain.caip_id === selectedChain)
-      if (selectedChainObj && executionResult.transactionHash) {
-        setExplorerUrl(`${selectedChainObj.explorerUrl}/tx/${executionResult.transactionHash}`)
-      }
-
-      setTransactionStatus("Processing")
-      await handleGetOrderHistory(transferResult.intentId)
-
-      if (portfolioBalance && selectedToken) {
-        const updatedTokenBalance = portfolioBalance.find((item) => item.symbol === selectedToken)
-        setTokenBalance(updatedTokenBalance || null)
-      }
-
-      showModal("orderHistory")
-      return transferResult
-    } catch (error: any) {
-      console.error("Transfer failed:", error)
-      setError(`Transfer failed: ${error.message}`)
-      setTransactionStatus("Failed")
-    } finally {
-      setIsLoading(false)
+    const sessionData = await verifySession(session)
+    const sessionConfig: SessionConfig = {
+      sessionPrivKey: sessionData.data.session_priv_key,
+      sessionPubkey: sessionData.data.session_pub_key,
+      userSWA: sessionData.data.user_swa,
     }
-  }
 
+    const feePayerAddress = "0xdb9B5bbf015047D84417df078c8F06fDb6D71b76"
+
+    const estimatedOp = await estimateUserOp(
+      {
+        intent: "TOKEN_TRANSFER",
+        chainId: selectedChain,
+        tokenAddress: transferData.token,
+        amount: transferData.amount,
+        recipient: transferData.recipient,
+      },
+      session,
+    )
+    setEstimatedUserOp(estimatedOp)
+
+    const transferResult: TransferResult = await transferToken(
+      transferData,
+      sessionConfig,
+      sponsorshipEnabled ? feePayerAddress : undefined,
+    )
+    setJobId(transferResult.intentId)
+
+    const signedOp = await signUserOp(transferResult.userOp, sessionConfig)
+    setSignedUserOp(signedOp)
+
+    const executionResult: ExecutionResult = await executeUserOp(signedOp, session)
+    setTransactionHash(executionResult.transactionHash)
+
+    const selectedChainObj = chains.find((chain) => chain.caip_id === selectedChain)
+    if (selectedChainObj && executionResult.transactionHash) {
+      setExplorerUrl(`${selectedChainObj.explorerUrl}/tx/${executionResult.transactionHash}`)
+    }
+
+    setTransactionStatus("Processing")
+    await handleGetOrderHistory(transferResult.intentId)
+
+    if (portfolioBalance && selectedToken) {
+      const updatedTokenBalance = portfolioBalance.find((item) => item.symbol === selectedToken)
+      setTokenBalance(updatedTokenBalance || null)
+    }
+
+    showModal("orderHistory")
+    return transferResult
+  } catch (error: any) {
+    console.error("Transfer failed:", error)
+    setError(`Transfer failed: ${error.message}`)
+    setTransactionStatus("Failed")
+    return undefined
+  } finally {
+    setIsLoading(false)
+  }
+}
   const renderTokenSelect = () => (
     <div>
       <label className="block text-sm font-medium text-gray-300 mb-1">Select Token</label>
@@ -704,7 +704,7 @@ function TwoStepTokenTransfer() {
             <>
               {orderHistory.status === "SUCCESSFUL" ? (
                 <div className="flex justify-center w-full pt-2">
-                  <ViewExplorerURL hash={orderHistory.downstreamTransactionHash[0]} url={explorerUrl || ""} />
+                  {/* <ViewExplorerURL hash={orderHistory.downstreamTransactionHash[0]} url={explorerUrl || ""} /> */}
                 </div>
               ) : (
                 <div className="flex justify-center pt-2">
