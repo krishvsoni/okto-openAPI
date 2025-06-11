@@ -448,8 +448,7 @@ function TwoStepTokenTransfer() {
         userSWA: sessionData.data.user_swa
       };
 
-      const feePayerAddress = "0xdb9B5bbf015047D84417df078c8F06fDb6D71b76";
-
+      const feePayerAddress = sessionConfig.userSWA;
       const estimatedOp = await estimateUserOp({
         intent: "TOKEN_TRANSFER",
         chainId: selectedChain,
@@ -462,7 +461,7 @@ function TwoStepTokenTransfer() {
       const transferResult = await transferToken(
         transferData,
         sessionConfig,
-        sponsorshipEnabled ? feePayerAddress : undefined
+        sponsorshipEnabled ? feePayerAddress as `0x${string}` : undefined
       ) as unknown as TransferResult;
       
       if (!transferResult || !transferResult.intentId || !transferResult.userOp) {
