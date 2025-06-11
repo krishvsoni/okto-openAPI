@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 "use client";
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
@@ -253,7 +254,7 @@ function TwoStepTokenTransfer() {
           console.log("Selected chain:", selectedChain);
           
           const filteredTokens = response.data.tokens
-            .filter((token) => {
+            .filter((token: { caip_id: any; symbol: any; }) => {
               // Handle both full CAIP format (eip155:42161) and just chain ID (42161)
               const tokenChainId = token.caip_id;
               const isMatch = tokenChainId === selectedChain || 
@@ -262,7 +263,7 @@ function TwoStepTokenTransfer() {
               console.log(`Token ${token.symbol} - tokenChainId: ${tokenChainId}, selectedChain: ${selectedChain}, match: ${isMatch}`);
               return isMatch;
             })
-            .map((token) => ({
+            .map((token: { address: any; symbol: any; short_name: any; name: any; decimals: any; caip_id: any; image: any; }) => ({
               address: token.address || "",
               symbol: token.symbol,
               name: token.short_name || token.name,
