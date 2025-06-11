@@ -1,29 +1,45 @@
-// using intent API call 
-
-/* eslint-disable @typescript-eslint/no-unused-vars */
 "use client";
 import { useState, useEffect } from "react";
-import {
-  Address,
-  getOrdersHistory,
-  getPortfolio,
-  getTokens,
-  useOkto,
-  UserPortfolioData,
-} from "@okto_web3/react-sdk";
-import { getChains } from "@okto_web3/react-sdk";
 import { useNavigate } from "react-router-dom";
 import CopyButton from "../components/CopyButton";
 import ViewExplorerURL from "../components/ViewExplorerURL";
 import { transferToken } from "../../intents/tokenTransfer_with_estimate";
+import { getChains } from "../../explorer/getChains";
+import { getTokens } from "../../explorer/getTokens";
+import { getPortfolio } from "../../explorer/getPortfolio";
+import { getOrderHistory } from "../../utils/getOrderHistory";
+import { verifySession } from "../../auth/verifySession_template";
+import { estimateUserOp } from "../../utils/invokeEstimateUserOp";
+import { signUserOp, executeUserOp } from "../../utils/invokeExecuteUserOp";
 
-// Types
+interface NetworkData {
+  caip_id: string;
+  network_name: string;
+  chain_id: string;
+  logo: string;
+  sponsorship_enabled: boolean;
+  gsn_enabled: boolean;
+  type: string;
+  network_id: string;
+  onramp_enabled: boolean;
+  whitelisted: boolean;
+  explorerUrl?: string;
+}
+
 interface TokenOption {
   address: string;
   symbol: string;
   name: string;
   decimals: number;
   caipId: string;
+  image: string;
+}
+
+interface PortfolioToken {
+  symbol: string;
+  balance: string;
+  usdtBalance: string;
+  inrBalance: string;
 }
 
 interface ModalProps {
@@ -33,12 +49,11 @@ interface ModalProps {
   children: React.ReactNode;
 }
 
-// Updated Data interface to match the transferToken function requirements
 interface TransferData {
   caipId: string;
   recipient: string;
   token: string;
-  amount: string; // Keep as string as expected by transferToken
+  amount: string;
 }
 
 interface SessionConfig {
@@ -47,7 +62,20 @@ interface SessionConfig {
   userSWA: string;
 }
 
-// Components
+interface TransferResult {
+  intentId: string;
+  userOp: any;
+}
+
+interface ExecutionResult {
+  transactionHash: string;
+}
+
+interface ViewURLProps {
+  hash: string;
+  url?: string;
+}
+
 const Modal = ({ isOpen, onClose, title, children }: ModalProps) =>
   !isOpen ? null : (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
@@ -80,14 +108,10 @@ const RefreshIcon = () => (
 );
 
 function TwoStepTokenTransfer() {
-  const oktoClient = useOkto();
   const navigate = useNavigate();
-
-  // Form state
-  const [chains, setChains] = useState<any[]>([]);
+  const [chains, setChains] = useState<NetworkData[]>([]);
   const [tokens, setTokens] = useState<TokenOption[]>([]);
-  const [portfolio, setPortfolio] = useState<UserPortfolioData>();
-  const [portfolioBalance, setPortfolioBalance] = useState<any[]>([]);
+  const [portfolioBalance, setPortfolioBalance] = useState<PortfolioToken[]>([]);
   const [selectedChain, setSelectedChain] = useState<string>("");
   const [selectedToken, setSelectedToken] = useState<string>("");
   const [amount, setAmount] = useState<string>("");
@@ -98,24 +122,20 @@ function TwoStepTokenTransfer() {
     usdtBalance: string;
     inrBalance: string;
   } | null>(null);
-
-  // Transaction state
   const [jobId, setJobId] = useState<string | null>(null);
-  const [userOp, setUserOp] = useState<any | null>(null);
-  const [signedUserOp, setSignedUserOp] = useState<any | null>(null);
+  const [estimatedUserOp, setEstimatedUserOp] = useState<any>(null);
+  const [signedUserOp, setSignedUserOp] = useState<any>(null);
+  const [transactionHash, setTransactionHash] = useState<string>("");
+  const [transactionStatus, setTransactionStatus] = useState<string>("");
   const [orderHistory, setOrderHistory] = useState<any | null>(null);
   const [explorerUrl, setExplorerUrl] = useState<string | null>(null);
-
-  // UI state
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [loadingTokens, setLoadingTokens] = useState(false);
-
-  // Modal states
   const [activeModal, setActiveModal] = useState<string | null>(null);
+  const [userAddress, setUserAddress] = useState<string>("");
 
-  // Helper functions
   const showModal = (modal: string) => setActiveModal(modal);
   const closeAllModals = () => setActiveModal(null);
 
@@ -123,13 +143,31 @@ function TwoStepTokenTransfer() {
     setSelectedToken("");
     setAmount("");
     setRecipient("");
-    setUserOp(null);
+    setEstimatedUserOp(null);
     setSignedUserOp(null);
+    setTransactionHash("");
+    setTransactionStatus("");
     setJobId(null);
     setOrderHistory(null);
     setExplorerUrl(null);
     setError(null);
     closeAllModals();
+  };
+
+  const verifyUserSession = async () => {
+    const session = localStorage.getItem("okto_session");
+    if (!session) {
+      navigate("/");
+      return null;
+    }
+
+    const sessionData = await verifySession(session);
+    if (sessionData.status !== "success") {
+      navigate("/");
+      return null;
+    }
+
+    return session;
   };
 
   const validateFormData = (): TransferData => {
@@ -141,25 +179,57 @@ function TwoStepTokenTransfer() {
       throw new Error("Please enter a valid recipient address");
 
     return {
-      amount: amount, // Keep as string
+      amount: amount,
       recipient: recipient,
-      token: token.address || "", // Use empty string for native tokens
+      token: token.address || "",
       caipId: selectedChain,
     };
   };
 
-  // Data fetching
+  useEffect(() => {
+    const fetchUserData = async () => {
+      try {
+        const session = await verifyUserSession();
+        if (!session) return;
+
+        const sessionData = await verifySession(session);
+        if (sessionData.status === "success") {
+          setUserAddress(sessionData.data.user_swa);
+        }
+      } catch (error: any) {
+        console.error("Error fetching user data:", error);
+        setError(`Failed to fetch user data: ${error.message}`);
+      }
+    };
+    fetchUserData();
+  }, [navigate]);
+
   useEffect(() => {
     const fetchChains = async () => {
       try {
-        setChains(await getChains(oktoClient));
+        const session = await verifyUserSession();
+        if (!session) return;
+
+        const response = await getChains(session);
+        console.log("Networks response:", response);
+
+        if (Array.isArray(response)) {
+          setChains(response);
+          if (response.length > 0) {
+            setSelectedChain(response[0].caip_id);
+            setSponsorshipEnabled(response[0].sponsorship_enabled);
+          }
+        } else {
+          console.error("Invalid networks data format:", response);
+          setError("Failed to fetch networks: Invalid data format");
+        }
       } catch (error: any) {
-        console.error("Error fetching chains:", error);
-        setError(`Failed to fetch chains: ${error.message}`);
+        console.error("Error fetching networks:", error);
+        setError(`Failed to fetch networks: ${error.message}`);
       }
     };
     fetchChains();
-  }, [oktoClient]);
+  }, [navigate]);
 
   useEffect(() => {
     const fetchTokens = async () => {
@@ -172,70 +242,62 @@ function TwoStepTokenTransfer() {
       setError(null);
 
       try {
-        const response = await getTokens(oktoClient);
-        const filteredTokens = response
-          .filter((token: any) => token.caipId === selectedChain)
-          .map((token: any) => ({
-            address: token.address,
-            symbol: token.symbol,
-            name: token.shortName || token.name,
-            decimals: token.decimals,
-            caipId: token.caipId,
-          }));
+        const session = await verifyUserSession();
+        if (!session) return;
 
-        setTokens(filteredTokens);
+        const response = await getTokens(session);
+        console.log("API Response:", response);
+
+        if (response?.status === "success" && Array.isArray(response.data.tokens)) {
+          console.log("All tokens from API:", response.data.tokens);
+          console.log("Selected chain:", selectedChain);
+          
+          const filteredTokens = response.data.tokens
+            .filter((token) => {
+              // Handle both full CAIP format (eip155:42161) and just chain ID (42161)
+              const tokenChainId = token.caip_id;
+              const isMatch = tokenChainId === selectedChain || 
+                             tokenChainId.split(':')[1] === selectedChain ||
+                             tokenChainId === `eip155:${selectedChain}`;
+              console.log(`Token ${token.symbol} - tokenChainId: ${tokenChainId}, selectedChain: ${selectedChain}, match: ${isMatch}`);
+              return isMatch;
+            })
+            .map((token) => ({
+              address: token.address || "",
+              symbol: token.symbol,
+              name: token.short_name || token.name,
+              decimals: Number(token.decimals),
+              caipId: token.caip_id,
+              image: token.image || "",
+            }));
+
+          console.log("Filtered Tokens:", filteredTokens);
+          setTokens(filteredTokens);
+        } else {
+          console.error("API response structure:", response);
+          throw new Error("Invalid token data structure");
+        }
       } catch (error: any) {
         console.error("Error fetching tokens:", error);
         setError(`Failed to fetch tokens: ${error.message}`);
+        setTokens([]);
       } finally {
         setLoadingTokens(false);
       }
     };
 
     fetchTokens();
-  }, [selectedChain, oktoClient]);
+  }, [selectedChain, navigate]);
 
   useEffect(() => {
     const fetchPortfolio = async () => {
       try {
-        const data = await getPortfolio(oktoClient);
-        setPortfolio(data);
+        const session = await verifyUserSession();
+        if (!session) return;
 
-        if (data?.groupTokens) {
-          const tokenBalanceMap = new Map();
-
-          data.groupTokens.forEach((group) => {
-            if (group.aggregationType === "token") {
-              tokenBalanceMap.set(group.symbol, {
-                balance: group.balance,
-                usdtBalance: group.holdingsPriceUsdt,
-                inrBalance: group.holdingsPriceInr,
-              });
-            }
-
-            if (group.tokens && group.tokens.length > 0) {
-              group.tokens.forEach((token) => {
-                tokenBalanceMap.set(token.symbol, {
-                  balance: token.balance,
-                  usdtBalance: token.holdingsPriceUsdt,
-                  inrBalance: token.holdingsPriceInr,
-                });
-              });
-            }
-          });
-
-          if (selectedToken && tokenBalanceMap.has(selectedToken)) {
-            setTokenBalance(tokenBalanceMap.get(selectedToken));
-          } else {
-            setTokenBalance(null);
-          }
-
-          setPortfolioBalance(
-            Array.from(tokenBalanceMap.entries()).map(([symbol, data]) => ({
-              symbol,
-              ...data,
-            }))
-          );
+        const portfolioData = await getPortfolio(session);
+        if (portfolioData.status === "success") {
+          setPortfolioBalance(portfolioData.data.group_tokens || []);
         }
       } catch (error: any) {
         console.error("Error fetching portfolio:", error);
@@ -244,7 +306,7 @@ function TwoStepTokenTransfer() {
     };
 
     fetchPortfolio();
-  }, [oktoClient, selectedToken]);
+  }, [navigate]);
 
   const handleNetworkChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const selectedCaipId = e.target.value;
@@ -252,17 +314,42 @@ function TwoStepTokenTransfer() {
     setSelectedToken("");
     setTokenBalance(null);
 
-    const selectedChainObj = chains.find(
-      (chain) => chain.caipId === selectedCaipId
+    const selectedNetwork = chains.find(
+      (network) => network.caip_id === selectedCaipId
     );
-    setSponsorshipEnabled(selectedChainObj?.sponsorshipEnabled || false);
+    setSponsorshipEnabled(selectedNetwork?.sponsorship_enabled || false);
   };
 
-  const handleTokenSelect = (symbol: string) => {
+  const handleTokenSelect = async (symbol: string) => {
     setSelectedToken(symbol);
     if (portfolioBalance) {
       const tokenData = portfolioBalance.find((item) => item.symbol === symbol);
-      setTokenBalance(tokenData || null);
+      if (tokenData) {
+        setTokenBalance({
+          balance: tokenData.balance || "0",
+          usdtBalance: tokenData.usdtBalance || "0",
+          inrBalance: tokenData.inrBalance || "0"
+        });
+      } else {
+        setTokenBalance(null);
+      }
+    }
+    await refreshPortfolio();
+  };
+
+  const refreshPortfolio = async () => {
+    setIsRefreshing(true);
+    try {
+      const session = await verifyUserSession();
+      if (!session) return;
+
+      const portfolioData = await getPortfolio(session);
+      setPortfolioBalance(portfolioData.data.group_tokens || []);
+    } catch (error: any) {
+      console.error("Error refreshing portfolio:", error);
+      setError(`Failed to refresh portfolio: ${error.message}`);
+    } finally {
+      setIsRefreshing(false);
     }
   };
 
@@ -277,12 +364,11 @@ function TwoStepTokenTransfer() {
     setError(null);
 
     try {
-      const orders = await getOrdersHistory(oktoClient, {
-        intentId,
-        intentType: "TOKEN_TRANSFER",
-      });
+      const session = await verifyUserSession();
+      if (!session) return;
+
+      const orders = await getOrderHistory(session, intentId, "TOKEN_TRANSFER");
       setOrderHistory(orders?.[0]);
-      console.log("Refreshed Order History:", orders);
       setActiveModal("orderHistory");
     } catch (error: any) {
       console.error("Error in fetching order history", error);
@@ -300,10 +386,10 @@ function TwoStepTokenTransfer() {
 
     setIsRefreshing(true);
     try {
-      const orders = await getOrdersHistory(oktoClient, {
-        intentId: jobId,
-        intentType: "TOKEN_TRANSFER",
-      });
+      const session = await verifyUserSession();
+      if (!session) return;
+
+      const orders = await getOrderHistory(session, jobId, "TOKEN_TRANSFER");
       setOrderHistory(orders?.[0]);
     } catch (error: any) {
       console.error("Error refreshing order history", error);
@@ -318,76 +404,71 @@ function TwoStepTokenTransfer() {
     setError(null);
 
     try {
-      const transferParams = validateFormData();
+      const session = await verifyUserSession();
+      if (!session) return;
+
+      const transferData = validateFormData();
+
+      const sessionData = await verifySession(session);
       const sessionConfig: SessionConfig = {
-        sessionPrivKey: "0x85ffef45e363f107476800f052102a940fcfa1167023ee462a859d3cada0cc76",
-        sessionPubkey: "0x04869dbfba722c6d3bdcb56ac2475f37c85b21907b3c1f748271a80bca12d60ea45612dfdf7dfbdea0035ee8633d8c6717cea87ee451830bf0ecb35c6b37825e4c",
-        userSWA: "0x281FaF4F242234c7AeD53530014766E845AC1E90",
+        sessionPrivKey: sessionData.data.session_priv_key,
+        sessionPubkey: sessionData.data.session_pub_key,
+        userSWA: sessionData.data.user_swa
       };
 
-      const feePayerAddress: Address = "0xdb9B5bbf015047D84417df078c8F06fDb6D71b76";
+      const feePayerAddress = "0xdb9B5bbf015047D84417df078c8F06fDb6D71b76";
 
-      let result: string;
-      if (sponsorshipEnabled) {
-        await transferToken(transferParams, sessionConfig, feePayerAddress);
-     
-        result = "";
-      } else {
-        await transferToken(transferParams, sessionConfig);
-        result = "";
+      const estimatedOp = await estimateUserOp({
+        intent: "TOKEN_TRANSFER",
+        chainId: selectedChain,
+        tokenAddress: transferData.token,
+        amount: transferData.amount,
+        recipient: transferData.recipient
+      }, session);
+      setEstimatedUserOp(estimatedOp);
+
+      const transferResult: TransferResult = await transferToken(
+        transferData,
+        sessionConfig,
+        sponsorshipEnabled ? feePayerAddress : undefined
+      );
+      setJobId(transferResult.intentId);
+
+      const signedOp = await signUserOp(transferResult.userOp, sessionConfig);
+      setSignedUserOp(signedOp);
+
+      const executionResult: ExecutionResult = await executeUserOp(signedOp, session);
+      setTransactionHash(executionResult.transactionHash);
+
+      const selectedChainObj = chains.find(chain => chain.caip_id === selectedChain);
+      if (selectedChainObj && executionResult.transactionHash) {
+        setExplorerUrl(`${selectedChainObj.explorerUrl}/tx/${executionResult.transactionHash}`);
       }
 
-      setJobId(result);
-      showModal("jobId");
-      console.log("Transfer jobId:", result);
-      
-      // Automatically fetch order history after successful transfer
-      setTimeout(() => {
-        handleGetOrderHistory(result);
-      }, 2000); // Wait 2 seconds before checking status
-      
+      setTransactionStatus("Processing");
+      await handleGetOrderHistory(transferResult.intentId);
+
+      if (portfolioBalance && selectedToken) {
+        const updatedTokenBalance = portfolioBalance.find(item => item.symbol === selectedToken);
+        setTokenBalance(updatedTokenBalance || null);
+      }
+
+      showModal("orderHistory");
     } catch (error: any) {
-      console.error("Error in token transfer:", error);
-      setError(`Error in token transfer: ${error.message}`);
+      console.error("Transfer failed:", error);
+      setError(`Transfer failed: ${error.message}`);
+      setTransactionStatus("Failed");
     } finally {
       setIsLoading(false);
     }
   };
 
-  const renderForm = () => (
-    <div className="space-y-4">
-      <div>
-        <label className="block text-sm font-medium text-gray-300 mb-1">
-          Select Network
-        </label>
-        <select
-          className="w-full p-3 bg-gray-800 border border-gray-700 rounded text-white"
-          value={selectedChain}
-          onChange={handleNetworkChange}
-          disabled={isLoading}
-        >
-          <option value="" disabled>
-            Select a network
-          </option>
-          {chains.map((chain) => (
-            <option key={chain.chainId} value={chain.caipId}>
-              {chain.networkName} ({chain.caipId})
-            </option>
-          ))}
-        </select>
-      </div>
-      {selectedChain && (
-        <p className="mt-2 text-sm text-gray-300 border border-indigo-700 p-2 my-2">
-          {sponsorshipEnabled
-            ? "Gas sponsorship is available ✅"
-            : "⚠️ Sponsorship is not activated for this chain, the user must hold native tokens to proceed with the transfer. You can get the token from the respective faucets"}
-        </p>
-      )}
-
-      <div>
-        <label className="block text-sm font-medium text-gray-300 mb-1">
-          Select Token
-        </label>
+  const renderTokenSelect = () => (
+    <div>
+      <label className="block text-sm font-medium text-gray-300 mb-1">
+        Select Token
+      </label>
+      <div className="relative">
         <select
           className="w-full p-3 bg-gray-800 border border-gray-700 rounded text-white"
           value={selectedToken}
@@ -404,43 +485,108 @@ function TwoStepTokenTransfer() {
               : "Select a token"}
           </option>
           {tokens.map((token) => (
-            <option
-              key={`${token.caipId}-${token.address}`}
-              value={token.symbol}
-            >
-              {token.symbol} - {token.address || "native"}
+            <option key={token.symbol} value={token.symbol}>
+              {token.symbol} - {token.name}
+            </option>
+          ))}
+        </select>
+        {selectedToken && tokens.find(t => t.symbol === selectedToken)?.image && (
+          <div className="absolute left-3 top-1/2 transform -translate-y-1/2">
+            <img
+              src={tokens.find(t => t.symbol === selectedToken)?.image}
+              alt={selectedToken}
+              className="w-5 h-5 rounded-full"
+              onError={(e) => {
+                (e.target as HTMLImageElement).style.display = 'none';
+              }}
+            />
+          </div>
+        )}
+      </div>
+      {selectedToken && (
+        <div className="mt-2 text-sm text-gray-400 bg-gray-800 p-3 rounded border border-gray-700">
+          <div className="flex items-center space-x-3">
+            {tokens.find(t => t.symbol === selectedToken)?.image && (
+              <img
+                src={tokens.find(t => t.symbol === selectedToken)?.image}
+                alt={selectedToken}
+                className="w-8 h-8"
+                onError={(e) => {
+                  (e.target as HTMLImageElement).style.display = 'none';
+                }}
+              />
+            )}
+            <div>
+              <p className="font-medium text-white">{tokens.find(t => t.symbol === selectedToken)?.name}</p>
+              <p className="text-gray-400">
+                {tokens.find(t => t.symbol === selectedToken)?.address
+                  ? `${tokens.find(t => t.symbol === selectedToken)?.address.slice(0, 6)}...${tokens.find(t => t.symbol === selectedToken)?.address.slice(-4)}`
+                  : 'Native Token'}
+              </p>
+            </div>
+          </div>
+          <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
+            <div className="bg-gray-700 p-2 rounded">
+              <p className="text-gray-400">Decimals</p>
+              <p className="text-white">{tokens.find(t => t.symbol === selectedToken)?.decimals}</p>
+            </div>
+            <div className="bg-gray-700 p-2 rounded">
+              <p className="text-gray-400">Network</p>
+              <p className="text-white">{chains.find(chain => chain.caip_id === selectedChain)?.network_name}</p>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  const renderForm = () => (
+    <div className="space-y-4">
+      <div>
+        <label className="block text-sm font-medium text-gray-300 mb-1">
+          Select Network
+        </label>
+        <select
+          className="w-full p-3 bg-gray-800 border border-gray-700 rounded text-white"
+          value={selectedChain}
+          onChange={handleNetworkChange}
+          disabled={isLoading}
+        >
+          <option value="" disabled>
+            {chains.length === 0 ? "Loading networks..." : "Select a network"}
+          </option>
+          {chains.map((network) => (
+            <option key={network.network_id} value={network.caip_id}>
+              {network.network_name} ({network.chain_id})
             </option>
           ))}
         </select>
       </div>
+      {selectedChain && (
+        <p className="mt-2 text-sm text-gray-300 border border-indigo-700 p-2 my-2">
+          {chains.find(network => network.caip_id === selectedChain)?.sponsorship_enabled
+            ? "Gas sponsorship is available ✅"
+            : "⚠️ Sponsorship is not activated for this chain, the user must hold native tokens to proceed with the transfer. You can get the token from the respective faucets"}
+        </p>
+      )}
+
+      {renderTokenSelect()}
 
       <div>
         <label className="flex justify-between block text-sm font-medium text-gray-300 mb-1">
           <p>Amount (in smallest unit):</p>
           <p>
-            {selectedChain && (
-              <>
-                Balance:{" "}
-                {selectedToken &&
-                portfolioBalance?.find((pb) => pb.symbol === selectedToken)
-                  ?.balance !== undefined
-                  ? Number(
-                      portfolioBalance.find((pb) => pb.symbol === selectedToken)
-                        ?.balance
-                    ).toFixed(4)
-                  : "N/A"}{" "}
-                &nbsp; INR:{" "}
-                {(selectedToken &&
-                  portfolioBalance?.find((pb) => pb.symbol === selectedToken)
-                    ?.inrBalance) ||
-                  "N/A"}{" "}
-                &nbsp; USDT:{" "}
-                {(selectedToken &&
-                  portfolioBalance?.find((pb) => pb.symbol === selectedToken)
-                    ?.usdtBalance) ||
-                  "N/A"}
-              </>
-            )}
+            Balance:{' '}
+            {selectedToken && portfolioBalance
+              ? (() => {
+                  const tokenData = portfolioBalance.find(
+                    (pb) => pb.symbol === selectedToken
+                  );
+                  return tokenData
+                    ? `${Number(tokenData.balance || 0).toFixed(4)}`
+                    : '0.0000';
+                })()
+              : '0.0000'}
           </p>
         </label>
         <input
@@ -487,35 +633,29 @@ function TwoStepTokenTransfer() {
           {isLoading ? "Processing..." : "Transfer Token"}
         </button>
       </div>
+
+      {transactionStatus && (
+        <div className="bg-gray-800 rounded-xl shadow-lg border border-violet-200 p-6">
+          <h2 className="text-violet-300 font-semibold text-xl mb-4">
+            Transaction Status
+          </h2>
+          <div className="space-y-2">
+            <p>Status: {transactionStatus}</p>
+            {transactionHash && (
+              <div className="flex items-center gap-2">
+                <span>Transaction Hash:</span>
+                <CopyButton text={transactionHash} />
+                <ViewExplorerURL hash={transactionHash} />
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 
   const renderModals = () => (
     <>
-      <Modal
-        isOpen={activeModal === "jobId"}
-        onClose={() => showModal("orderHistory")}
-        title="Transaction Submitted"
-      >
-        <div className="space-y-4 text-white">
-          <p>Your transaction has been submitted successfully.</p>
-          <div className="bg-gray-700 p-3 rounded">
-            <p className="text-sm text-gray-300 mb-1">Job ID:</p>
-            <CopyButton text={jobId ?? ""} />
-            <p className="font-mono break-all">{jobId}</p>
-          </div>
-          <div className="flex justify-center pt-2">
-            <button
-              className="p-3 bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors w-full"
-              onClick={() => handleGetOrderHistory()}
-              disabled={isLoading}
-            >
-              {isLoading ? "Loading..." : "Check Job Status"}
-            </button>
-          </div>
-        </div>
-      </Modal>
-
       <Modal
         isOpen={activeModal === "orderHistory"}
         onClose={closeAllModals}
@@ -554,7 +694,10 @@ function TwoStepTokenTransfer() {
             <>
               {orderHistory.status === "SUCCESSFUL" ? (
                 <div className="flex justify-center w-full pt-2">
-                  <ViewExplorerURL orderHistory={orderHistory} />
+                  <ViewExplorerURL
+                    hash={orderHistory.downstreamTransactionHash[0]}
+                    url={explorerUrl || ""}
+                  />
                 </div>
               ) : (
                 <div className="flex justify-center pt-2">
@@ -618,6 +761,13 @@ function TwoStepTokenTransfer() {
         {error && (
           <div className="bg-red-900/50 border border-red-700 text-red-100 px-4 py-3 rounded">
             {error}
+          </div>
+        )}
+
+        {userAddress && (
+          <div className="text-white text-center mb-4">
+            <p className="text-sm text-gray-400">Your Address:</p>
+            <p className="font-mono break-all">{userAddress}</p>
           </div>
         )}
 

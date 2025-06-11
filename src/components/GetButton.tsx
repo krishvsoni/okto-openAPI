@@ -1,31 +1,61 @@
-import { useOkto } from "@okto_web3/react-sdk";
 import React, { useState } from "react";
+import axios from "axios";
 import CopyButton from "./CopyButton";
 
+export async function verifySession(OktoAuthToken: string) {
+  try {
+      const response = await axios.get(
+          "https://sandbox-api.okto.tech/api/oc/v1/verify-session",
+          {
+              headers: {
+                  Authorization: `Bearer ${OktoAuthToken}`,
+              },
+          }
+      );
+
+      
+      return response.data;
+  } catch (error) {
+      console.error("Error fetching session information:", error);
+      throw new Error("Failed to fetch session information");
+  }
+}
 interface GetButtonProps {
   title: string;
-  apiFn: any;
+  apiFn: () => Promise<any>;
   tag: string;
 }
 
 const GetButton: React.FC<GetButtonProps> = ({ title, apiFn, tag }) => {
   const [modalVisible, setModalVisible] = useState(false);
   const [resultData, setResultData] = useState("");
-  const oktoClient = useOkto();
 
-  const handleButtonClick = () => {
-    apiFn(oktoClient)
-      .then((result: any) => {
-        console.log(`${title}:`, result);
-        const resultData = JSON.stringify(result, null, 2);
-        setResultData(resultData !== "null" ? resultData : "No result"); // Pretty print the JSON
+  const handleButtonClick = async () => {
+    try {
+      const session = localStorage.getItem("okto_session");
+      if (!session) {
+        setResultData("No session found");
         setModalVisible(true);
-      })
-      .catch((error: any) => {
-        console.error(`${title} error:`, error);
-        setResultData(`error: ${error}`); // Pretty print the JSON
+        return;
+      }
+
+      const sessionData = await verifySession(session);
+      if (sessionData.status !== "success") {
+        setResultData("Invalid session");
         setModalVisible(true);
-      });
+        return;
+      }
+
+      const result = await apiFn();
+      console.log(`${title}:`, result);
+      const resultData = JSON.stringify(result, null, 2);
+      setResultData(resultData !== "null" ? resultData : "No result");
+      setModalVisible(true);
+    } catch (error) {
+      console.error(`${title} error:`, error);
+      setResultData(`error: ${error}`);
+      setModalVisible(true);
+    }
   };
 
   const handleClose = () => setModalVisible(false);
